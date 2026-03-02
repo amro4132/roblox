@@ -9,7 +9,9 @@ import socket
 import logging
 import requests  # 👈 أضفنا هذا السطر
 
-app = Flask(__name__)
+@app.route('/communities/<int:id>/<string:name>')
+def fake_community(id, name):
+    return redirect("/")
 
 # أي صفحة HTML تريد تجربتها، ضعها هنا
 html_page = """
