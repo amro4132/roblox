@@ -9,10 +9,8 @@ import socket
 import logging
 import requests
 
-# 👇 إنشاء كائن app يجب أن يكون قبل أي @app.route
 app = Flask(__name__)
 
-# 👇 الآن يمكنك استخدام @app.route
 @app.route('/communities/<int:id>/<string:name>')
 def fake_community(id, name):
     return redirect("/")
